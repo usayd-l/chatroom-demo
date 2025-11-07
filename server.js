@@ -63,6 +63,7 @@ wss.on("connection", (ws, req) => {
   const remoteIP = getRemoteIP(req);
   clients.set(ws, { username: null, ip: remoteIP });
 
+  // Send chat history to the new client
   ws.send(JSON.stringify({ type: "history", data: chatHistory }));
   updateOnlineCount();
 
@@ -71,28 +72,37 @@ wss.on("connection", (ws, req) => {
       const data = JSON.parse(msgRaw);
       const client = clients.get(ws) || {};
 
-      // Registration / username update
+      // Handle registration / initial username
       if (data.type === "register") {
         const newName = data.username || "Anonymous";
+        const oldName = client.username || "Anonymous";
         clients.set(ws, { username: newName, ip: remoteIP });
-        console.log(`👤 ${guessDevice(data.userAgent)}  ${newName} — ${remoteIP}`);
 
-        broadcast({ type: "system", text: `${newName} joined the chat` });
+        if (!client.username) {
+          // first time connecting
+          console.log(`👤 ${guessDevice(data.userAgent)}  ${newName} — ${remoteIP}`);
+          broadcast({ type: "system", text: `${newName} joined the chat` });
+        } else if (client.username !== newName) {
+          // username change
+          console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
+          broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
+        }
         updateOnlineCount();
         return;
       }
 
-      // Ignore chat messages if not registered yet
+      // Ignore chat if username not registered yet
       if (data.type === "chat" && (!client.username || client.username === null)) return;
 
       // Handle chat message
       if (data.type === "chat") {
-        // Check for username change command
+        // Check for inline username change command
         if (data.text.startsWith("/name ")) {
           const newName = data.text.replace("/name ", "").trim();
-          if (newName) {
-            const oldName = client.username;
+          if (newName && client.username !== newName) {
+            const oldName = client.username || "Anonymous";
             clients.set(ws, { username: newName, ip: remoteIP });
+
             broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
             console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
             return;
