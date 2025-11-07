@@ -8,6 +8,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const port = process.env.PORT || 8080;
 
+// Admin usernames
+const ADMINS = ["usayd"];
+
 const server = http.createServer((req, res) => {
   const filePath = path.join(__dirname, req.url === "/" ? "index.html" : req.url);
   fs.readFile(filePath, (err, data) => {
@@ -23,17 +26,18 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
-let chatHistory = [];
-const clients = new Map(); // ws -> {username, ip}
 
-// helper: get IP
+let chatHistory = [];
+const MAX_HISTORY = 1000;
+const clients = new Map(); // ws -> {username, ip}
+const typingUsers = new Map(); // ws -> username
+
 function getRemoteIP(req) {
   const forwarded = req.headers?.["x-forwarded-for"] || req.headers?.["x-real-ip"];
   if (forwarded) return forwarded.split(",")[0].trim();
   return req.socket.remoteAddress.replace(/^::ffff:/, "");
 }
 
-// device emoji guess
 function guessDevice(ua) {
   if (!ua) return "🖥️";
   ua = ua.toLowerCase();
@@ -55,23 +59,34 @@ function updateOnlineCount() {
   broadcast({ type: "online", count: wss.clients.size });
 }
 
+function updateTyping() {
+  broadcast({ type: "typing_update", list: Array.from(typingUsers.values()) });
+}
+
 wss.on("connection", (ws, req) => {
   const remoteIP = getRemoteIP(req);
   clients.set(ws, { username: null, ip: remoteIP });
 
+  // Send chat history
   ws.send(JSON.stringify({ type: "history", data: chatHistory }));
   updateOnlineCount();
 
   ws.on("message", (msgRaw) => {
     try {
       const data = JSON.parse(msgRaw);
-      const client = clients.get(ws) || {};
+      const client = clients.get(ws);
 
       // Registration / username
       if (data.type === "register") {
-        const newName = data.username || "Anonymous";
         const oldName = client.username || "Anonymous";
+        const newName = data.username || "Anonymous";
         clients.set(ws, { username: newName, ip: remoteIP });
+
+        // Update typing state if user was typing
+        if (typingUsers.has(ws)) {
+          typingUsers.set(ws, newName);
+          updateTyping();
+        }
 
         if (!client.username) {
           console.log(`👤 ${guessDevice(data.userAgent)}  ${newName} — ${remoteIP}`);
@@ -80,59 +95,71 @@ wss.on("connection", (ws, req) => {
           console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
           broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
         }
+
         updateOnlineCount();
         return;
       }
 
-      // Admin clear command
-      if (data.type === "chat" && data.text === "/clear") {
-        const username = (client.username || "").trim().toLowerCase();
-        if (username === "usayd") {
-          chatHistory = [];
-          broadcast({ type: "clear" });
-          broadcast({ type: "system", text: `🧹 Chat cleared by ${client.username}` });
-          console.log(`🧹 Chat cleared by admin (${client.username})`);
-        } else {
-          ws.send(JSON.stringify({ type: "system", text: "🚫 Only admin can clear chat." }));
-        }
+      if (!client.username) return;
+
+      // Admin /clear
+      if (data.text === "/clear" && ADMINS.includes(client.username)) {
+        chatHistory = [];
+        broadcast({ type: "clear" });
+        console.log(`🧹 Chat cleared by ${client.username} — ${remoteIP}`);
         return;
       }
 
-      // Ignore unregistered
-      if (data.type === "chat" && (!client.username || client.username === null)) return;
-
-      // Inline username change
-      if (data.type === "chat" && data.text.startsWith("/name ")) {
-        const newName = data.text.replace("/name ", "").trim();
-        if (newName && client.username !== newName) {
-          const oldName = client.username || "Anonymous";
-          clients.set(ws, { username: newName, ip: remoteIP });
-          broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
-          console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
+      // Chat message
+      if (data.type === "chat") {
+        if (data.text.startsWith("/name ")) {
+          const newName = data.text.replace("/name ", "").trim();
+          if (newName && client.username !== newName) {
+            const oldName = client.username || "Anonymous";
+            clients.set(ws, { username: newName, ip: remoteIP });
+            if (typingUsers.has(ws)) typingUsers.set(ws, newName);
+            broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
+            console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
+          }
           return;
         }
-      }
 
-      // Normal chat message
-      if (data.type === "chat") {
-        const entry = { username: client.username || "Anonymous", text: data.text, time: new Date().toLocaleTimeString() };
+        const entry = {
+          username: client.username,
+          text: data.text,
+          time: new Date().toLocaleTimeString()
+        };
+
         chatHistory.push(entry);
+        if (chatHistory.length > MAX_HISTORY) chatHistory.shift();
         broadcast({ type: "chat", data: entry });
         console.log(`[${entry.time}] ${entry.username}: ${entry.text}`);
       }
 
+      // Typing events
+      if (data.type === "typing") {
+        typingUsers.set(ws, client.username);
+        updateTyping();
+      }
+
+      if (data.type === "stop_typing") {
+        typingUsers.delete(ws);
+        updateTyping();
+      }
+
     } catch (e) {
-      console.warn("Received non-json message or parse error:", e?.message || e);
+      console.warn("Received non-json message:", e?.message || e);
     }
   });
 
   ws.on("close", () => {
     clients.delete(ws);
+    typingUsers.delete(ws);
     updateOnlineCount();
-    console.log(`🔴 Disconnected — ${remoteIP}`);
+    updateTyping();
   });
 });
 
 server.listen(port, () => {
-  console.log(`✅ Chat server running on port ${port}`);
+  console.log(`Chat server running on port ${port}`);
 });
