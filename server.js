@@ -6,7 +6,6 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const port = process.env.PORT || 8080;
 
 const server = http.createServer((req, res) => {
@@ -24,7 +23,6 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
-
 let chatHistory = [];
 const clients = new Map(); // ws -> {username, ip}
 
@@ -35,7 +33,7 @@ function getRemoteIP(req) {
   return req.socket.remoteAddress.replace(/^::ffff:/, "");
 }
 
-// simple device guess from UA
+// device emoji guess
 function guessDevice(ua) {
   if (!ua) return "🖥️";
   ua = ua.toLowerCase();
@@ -46,7 +44,6 @@ function guessDevice(ua) {
   return "🖥️";
 }
 
-// broadcast helper
 function broadcast(obj) {
   const msg = JSON.stringify(obj);
   for (const client of wss.clients) {
@@ -54,7 +51,6 @@ function broadcast(obj) {
   }
 }
 
-// update online count
 function updateOnlineCount() {
   broadcast({ type: "online", count: wss.clients.size });
 }
@@ -63,7 +59,6 @@ wss.on("connection", (ws, req) => {
   const remoteIP = getRemoteIP(req);
   clients.set(ws, { username: null, ip: remoteIP });
 
-  // Send chat history to the new client
   ws.send(JSON.stringify({ type: "history", data: chatHistory }));
   updateOnlineCount();
 
@@ -72,18 +67,16 @@ wss.on("connection", (ws, req) => {
       const data = JSON.parse(msgRaw);
       const client = clients.get(ws) || {};
 
-      // Handle registration / initial username
+      // Registration / username
       if (data.type === "register") {
         const newName = data.username || "Anonymous";
         const oldName = client.username || "Anonymous";
         clients.set(ws, { username: newName, ip: remoteIP });
 
         if (!client.username) {
-          // first time connecting
           console.log(`👤 ${guessDevice(data.userAgent)}  ${newName} — ${remoteIP}`);
           broadcast({ type: "system", text: `${newName} joined the chat` });
         } else if (client.username !== newName) {
-          // username change
           console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
           broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
         }
@@ -91,29 +84,38 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // Ignore chat if username not registered yet
+      // Admin clear command
+      if (data.type === "chat" && data.text === "/clear") {
+        const username = (client.username || "").trim().toLowerCase();
+        if (username === "usayd") {
+          chatHistory = [];
+          broadcast({ type: "clear" });
+          broadcast({ type: "system", text: `🧹 Chat cleared by ${client.username}` });
+          console.log(`🧹 Chat cleared by admin (${client.username})`);
+        } else {
+          ws.send(JSON.stringify({ type: "system", text: "🚫 Only admin can clear chat." }));
+        }
+        return;
+      }
+
+      // Ignore unregistered
       if (data.type === "chat" && (!client.username || client.username === null)) return;
 
-      // Handle chat message
-      if (data.type === "chat") {
-        // Check for inline username change command
-        if (data.text.startsWith("/name ")) {
-          const newName = data.text.replace("/name ", "").trim();
-          if (newName && client.username !== newName) {
-            const oldName = client.username || "Anonymous";
-            clients.set(ws, { username: newName, ip: remoteIP });
-
-            broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
-            console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
-            return;
-          }
+      // Inline username change
+      if (data.type === "chat" && data.text.startsWith("/name ")) {
+        const newName = data.text.replace("/name ", "").trim();
+        if (newName && client.username !== newName) {
+          const oldName = client.username || "Anonymous";
+          clients.set(ws, { username: newName, ip: remoteIP });
+          broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
+          console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
+          return;
         }
+      }
 
-        const entry = {
-          username: client.username || "Anonymous",
-          text: data.text,
-          time: new Date().toLocaleTimeString(),
-        };
+      // Normal chat message
+      if (data.type === "chat") {
+        const entry = { username: client.username || "Anonymous", text: data.text, time: new Date().toLocaleTimeString() };
         chatHistory.push(entry);
         broadcast({ type: "chat", data: entry });
         console.log(`[${entry.time}] ${entry.username}: ${entry.text}`);
@@ -125,16 +127,12 @@ wss.on("connection", (ws, req) => {
   });
 
   ws.on("close", () => {
-    const info = clients.get(ws) || {};
-    if (info.username) {
-      broadcast({ type: "system", text: `${info.username} left the chat` });
-      console.log(`🔴 ${info.username} disconnected — ${info.ip}`);
-    } else {
-      console.log(`🔴 Unknown client disconnected — ${info.ip}`);
-    }
     clients.delete(ws);
     updateOnlineCount();
+    console.log(`🔴 Disconnected — ${remoteIP}`);
   });
 });
 
-server.listen(port, () => console.log(`✅ Server running on port ${port}`));
+server.listen(port, () => {
+  console.log(`✅ Chat server running on port ${port}`);
+});

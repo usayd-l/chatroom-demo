@@ -1,236 +1,197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Chatroom</title>
-  <style>
-    :root {
-      --bg: #0f1115;
-      --fg: #f2f2f2;
-      --accent: #00aaff;
-      --bubble-bg: #1a1d22;
-      --bubble-user-bg: #0077cc;
-      --system-color: #888;
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chatroom</title>
+<style>
+  body {
+    font-family: monospace, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    margin: 0;
+    background: black;
+    color: #00ff00;
+  }
 
-    * { box-sizing: border-box; }
+  header {
+    background: #111;
+    padding: 10px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #222;
+  }
 
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--fg);
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      overflow: hidden;
-    }
+  #header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
 
-    header {
-      background: #121418;
-      padding: 0.9rem 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #222;
-      position: sticky;
-      top: 0;
-      z-index: 5;
-    }
+  #online {
+    font-size: 0.9em;
+    color: #0f0;
+  }
 
-    header h1 {
-      font-size: 1.1rem;
-      margin: 0;
-      font-weight: 500;
-      color: var(--accent);
-    }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    font-size: 14px;
+    line-height: 1.3em;
+  }
 
-    header #online {
-      font-size: 0.9rem;
-      opacity: 0.8;
-    }
+  .msg {
+    margin: 2px 0;
+  }
 
-    #messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 1rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      scroll-behavior: smooth;
-    }
+  .system {
+    color: #0f0;
+    font-style: italic;
+    margin: 6px 0;
+    text-align: center;
+  }
 
-    .message {
-      max-width: 85%;
-      word-wrap: break-word;
-      padding: 0.7rem 0.9rem;
-      border-radius: 1rem;
-      background: var(--bubble-bg);
-      align-self: flex-start;
-      line-height: 1.4;
-    }
+  #input {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid #222;
+    background: #111;
+    padding: 6px 10px;
+  }
 
-    .message.you {
-      background: var(--bubble-user-bg);
-      color: white;
-      align-self: flex-end;
-    }
+  #note {
+    font-size: 0.8em;
+    color: #0f0;
+    margin-bottom: 4px;
+  }
 
-    .message span.name {
-      font-weight: 600;
-      color: var(--accent);
-      display: block;
-      margin-bottom: 0.2rem;
-      font-size: 0.85rem;
-    }
+  #msg-container {
+    display: flex;
+    gap: 6px;
+  }
 
-    .system {
-      text-align: center;
-      color: var(--system-color);
-      font-size: 0.85rem;
-      margin: 0.5rem 0;
-    }
+  input {
+    flex: 1;
+    padding: 8px;
+    background: #0b0b0b;
+    color: #00ff00;
+    border: 1px solid #0f0;
+    outline: none;
+    font-size: 14px;
+  }
 
-    #input-bar {
-      display: flex;
-      padding: 0.6rem;
-      background: #121418;
-      border-top: 1px solid #222;
-    }
+  button {
+    background: #00ff00;
+    color: black;
+    border: none;
+    padding: 0 14px;
+    cursor: pointer;
+    font-size: 14px;
+  }
 
-    #msg {
-      flex: 1;
-      padding: 0.75rem 1rem;
-      border: none;
-      border-radius: 1.5rem;
-      background: #1a1d22;
-      color: var(--fg);
-      font-size: 1rem;
-      outline: none;
-    }
-
-    button {
-      margin-left: 0.6rem;
-      padding: 0.75rem 1.1rem;
-      border: none;
-      border-radius: 1.5rem;
-      background: var(--accent);
-      color: #fff;
-      font-weight: 600;
-      font-size: 1rem;
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: background 0.2s;
-    }
-
-    button:active { background: #0090dd; }
-
-    /* Mobile tweaks */
-    @media (max-width: 600px) {
-      header h1 { font-size: 1rem; }
-      #messages { padding: 0.7rem; }
-      .message { font-size: 0.95rem; }
-      #msg { font-size: 1rem; }
-      button { font-size: 1rem; }
-    }
-  </style>
+  @media (max-width: 600px) {
+    #messages { font-size: 13px; }
+    input { font-size: 13px; padding: 6px; }
+    button { font-size: 13px; padding: 0 10px; }
+    #note { font-size: 0.75em; }
+  }
+</style>
 </head>
 <body>
-  <header>
-    <h1>Chatroom</h1>
-    <div id="online">Online: 0</div>
-  </header>
+<header>
+  <div id="header-left">
+    the grid
+    <span id="online">Online: 0</span>
+  </div>
+</header>
 
-  <div id="messages"></div>
+<div id="messages"></div>
 
-  <div id="input-bar">
-    <input id="msg" type="text" placeholder="Type a message..." autocomplete="off" />
+<div id="input">
+  <div id="note">Leave blank to join as Anonymous. Use /name NEWNAME to change your name. Admin can use /clear.</div>
+  <div id="msg-container">
+    <input id="msg" placeholder="Type a message..." />
     <button onclick="send()">Send</button>
   </div>
+</div>
 
-  <script>
-    let username = sessionStorage.getItem("chatUsername");
-    if (!username) {
-      username = prompt("Enter your name (or leave blank for Anonymous):") || "Anonymous";
-      sessionStorage.setItem("chatUsername", username);
+<script>
+  let username = sessionStorage.getItem("chatUsername");
+  if (!username) {
+    username = prompt("Enter your name (or leave blank for Anonymous):") || "Anonymous";
+    sessionStorage.setItem("chatUsername", username);
+  }
+
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+  const messages = document.getElementById("messages");
+  const online = document.getElementById("online");
+
+  function scrollBottom() {
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ type: "register", username, userAgent: navigator.userAgent }));
+  };
+
+  socket.onmessage = (event) => {
+    const packet = JSON.parse(event.data);
+    if (packet.type === "chat") addMessage(packet.data.username, packet.data.text, packet.data.time);
+    else if (packet.type === "history") {
+      messages.innerHTML = "";
+      packet.data.forEach(msg => addMessage(msg.username, msg.text, msg.time));
     }
-
-    const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
-
-    const messages = document.getElementById("messages");
-    const online = document.getElementById("online");
-
-    function scrollBottom() {
-      messages.scrollTop = messages.scrollHeight;
+    else if (packet.type === "system") addSystem(packet.text);
+    else if (packet.type === "clear") {
+      messages.innerHTML = "";
+      addSystem("Chat cleared by admin");
     }
+    else if (packet.type === "online") online.textContent = `Online: ${packet.count}`;
+  };
 
-    socket.onopen = () => {
-      socket.send(JSON.stringify({
-        type: "register",
-        username,
-        userAgent: navigator.userAgent
-      }));
-    };
+  function addMessage(name, text, time) {
+    const div = document.createElement("div");
+    div.className = "msg";
+    div.textContent = `[${time}] ${name}: ${text}`;
+    messages.appendChild(div);
+    scrollBottom();
+  }
 
-    socket.onmessage = (event) => {
-      const packet = JSON.parse(event.data);
+  function addSystem(text) {
+    const div = document.createElement("div");
+    div.className = "system";
+    div.textContent = `--- ${text} ---`;
+    messages.appendChild(div);
+    scrollBottom();
+  }
 
-      if (packet.type === "chat") {
-        addMessage(packet.data.username, packet.data.text, packet.data.time);
-      } else if (packet.type === "history") {
-        messages.innerHTML = "";
-        packet.data.forEach(msg => addMessage(msg.username, msg.text, msg.time));
-      } else if (packet.type === "system") {
-        addSystem(packet.text);
-      } else if (packet.type === "clear") {
-        messages.innerHTML = "";
-        addSystem("Chat cleared by admin");
-      } else if (packet.type === "online") {
-        online.textContent = `Online: ${packet.count}`;
+  function send() {
+    const input = document.getElementById("msg");
+    const text = input.value.trim();
+    if (!text) return;
+
+    if (text.startsWith("/name ")) {
+      const newName = text.slice(6).trim();
+      if (newName) {
+        username = newName;
+        sessionStorage.setItem("chatUsername", username);
+        socket.send(JSON.stringify({ type: "register", username, userAgent: navigator.userAgent }));
+        addSystem(`Your username has been changed to ${username}`);
+        input.value = "";
+        return;
       }
-    };
-
-    function addMessage(name, text, time) {
-      const div = document.createElement("div");
-      div.className = "message" + (name === username ? " you" : "");
-      div.innerHTML = `<span class="name">${name}</span>${text}`;
-      messages.appendChild(div);
-      scrollBottom();
     }
 
-    function addSystem(text) {
-      const div = document.createElement("div");
-      div.className = "system";
-      div.textContent = text;
-      messages.appendChild(div);
-      scrollBottom();
-    }
+    socket.send(JSON.stringify({ type: "chat", text }));
+    input.value = "";
+  }
 
-    function send() {
-      const input = document.getElementById("msg");
-      const text = input.value.trim();
-      if (!text) return;
-
-      if (text.startsWith("/name ")) {
-        const newName = text.slice(6).trim();
-        if (newName) {
-          username = newName;
-          sessionStorage.setItem("chatUsername", username);
-          socket.send(JSON.stringify({ type: "register", username, userAgent: navigator.userAgent }));
-          addSystem(`You are now known as ${username}`);
-          input.value = "";
-          return;
-        }
-      }
-
-      socket.send(JSON.stringify({ type: "chat", text }));
-      input.value = "";
-    }
-
-    document.getElementById("msg").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") send();
-    });
-  </script>
+  document.getElementById("msg").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") send();
+  });
+</script>
 </body>
 </html>
