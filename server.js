@@ -127,7 +127,8 @@ wss.on("connection", (ws, req) => {
         const entry = {
           username: client.username || "Anonymous",
           text: data.text,
-          time: new Date().toLocaleTimeString(),
+          // send an ISO timestamp so the client can format it in the user's local timezone
+          time: new Date().toISOString(),
         };
         chatHistory.push(entry);
         if (chatHistory.length > 500) chatHistory.shift();
