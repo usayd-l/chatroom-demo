@@ -133,7 +133,19 @@ wss.on("connection", (ws, req) => {
         chatHistory.push(entry);
         if (chatHistory.length > 500) chatHistory.shift();
         broadcast({ type: "chat", data: entry });
-        console.log(`[${entry.time}] ${entry.username}: ${entry.text}`);
+        // Format log time for backend terminal
+        const logTime = (() => {
+          const d = new Date(entry.time);
+          if (isNaN(d)) return entry.time;
+          // Format: YYYY-MM-DD HH:mm:ss (local server time)
+          return d.getFullYear() + "-" +
+            String(d.getMonth() + 1).padStart(2, '0') + "-" +
+            String(d.getDate()).padStart(2, '0') + " " +
+            String(d.getHours()).padStart(2, '0') + ":" +
+            String(d.getMinutes()).padStart(2, '0') + ":" +
+            String(d.getSeconds()).padStart(2, '0');
+        })();
+        console.log(`[${logTime}] ${entry.username}: ${entry.text}`);
       }
     } catch (err) {
       console.warn("Parse error:", err.message);
