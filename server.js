@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const port = process.env.PORT || 8080;
 
-// serve static files
+// Serve static files
 const server = http.createServer((req, res) => {
   const filePath = path.join(__dirname, req.url === "/" ? "index.html" : req.url);
   fs.readFile(filePath, (err, data) => {
@@ -16,7 +16,9 @@ const server = http.createServer((req, res) => {
       res.writeHead(404);
       res.end("Not Found");
     } else {
-      const type = req.url.endsWith(".js") ? "application/javascript" : "text/html";
+      const type = req.url.endsWith(".js")
+        ? "application/javascript"
+        : "text/html";
       res.writeHead(200, { "Content-Type": type });
       res.end(data);
     }
@@ -27,7 +29,7 @@ const wss = new WebSocketServer({ server });
 const clients = new Map(); // ws -> { username, ip }
 let chatHistory = [];
 
-// helper functions
+// --- Helpers ---
 function getRemoteIP(req) {
   const forwarded = req.headers?.["x-forwarded-for"] || req.headers?.["x-real-ip"];
   if (forwarded) return forwarded.split(",")[0].trim();
@@ -60,7 +62,7 @@ function broadcastTyping(username, isTyping) {
   broadcast({ type: "typing", username, isTyping });
 }
 
-// websocket behavior
+// --- WebSocket Behavior ---
 wss.on("connection", (ws, req) => {
   const remoteIP = getRemoteIP(req);
   clients.set(ws, { username: null, ip: remoteIP });
@@ -72,10 +74,9 @@ wss.on("connection", (ws, req) => {
     try {
       const data = JSON.parse(msgRaw);
       const client = clients.get(ws);
+      if (!client) return;
 
-      if (!client) return; // safety
-
-      // handle registration
+      // --- Handle registration ---
       if (data.type === "register") {
         const newName = data.username || "Anonymous";
         const oldName = client.username;
@@ -92,7 +93,6 @@ wss.on("connection", (ws, req) => {
           return;
         }
 
-        // assign username once (no re-map of socket)
         client.username = newName;
         clients.set(ws, client);
 
@@ -108,13 +108,13 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // typing
+      // --- Typing indicator ---
       if (data.type === "typing") {
         if (client.username) broadcastTyping(client.username, data.isTyping);
         return;
       }
 
-      // admin clear
+      // --- Admin clear command ---
       if (data.type === "chat" && data.text === "/clear" && client.username === "usayd") {
         chatHistory = [];
         broadcast({ type: "clear" });
@@ -122,36 +122,37 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // normal chat
+      // --- Normal chat message ---
       if (data.type === "chat") {
         const entry = {
           username: client.username || "Anonymous",
           text: data.text,
-          // send an ISO timestamp so the client can format it in the user's local timezone
-          time: new Date().toISOString(),
+          time: new Date().toISOString(), // ISO → formatted by client in local TZ
         };
         chatHistory.push(entry);
         if (chatHistory.length > 500) chatHistory.shift();
         broadcast({ type: "chat", data: entry });
-        // Format log time for backend terminal
+
+        // Log server-side time
         const logTime = (() => {
           const d = new Date(entry.time);
           if (isNaN(d)) return entry.time;
-          // Format: YYYY-MM-DD HH:mm:ss (local server time)
           return d.getFullYear() + "-" +
-            String(d.getMonth() + 1).padStart(2, '0') + "-" +
-            String(d.getDate()).padStart(2, '0') + " " +
-            String(d.getHours()).padStart(2, '0') + ":" +
-            String(d.getMinutes()).padStart(2, '0') + ":" +
-            String(d.getSeconds()).padStart(2, '0');
+            String(d.getMonth() + 1).padStart(2, "0") + "-" +
+            String(d.getDate()).padStart(2, "0") + " " +
+            String(d.getHours()).padStart(2, "0") + ":" +
+            String(d.getMinutes()).padStart(2, "0") + ":" +
+            String(d.getSeconds()).padStart(2, "0");
         })();
         console.log(`[${logTime}] ${entry.username}: ${entry.text}`);
       }
+
     } catch (err) {
       console.warn("Parse error:", err.message);
     }
   });
 
+  // --- Handle disconnect ---
   ws.on("close", () => {
     const client = clients.get(ws);
     if (client?.username) {
@@ -160,6 +161,12 @@ wss.on("connection", (ws, req) => {
     }
     clients.delete(ws);
     updateOnlineCount();
+
+    // If no users left, clear chat
+    if (wss.clients.size === 0) {
+      chatHistory = [];
+      console.log("💾 All users disconnected — chat history cleared.");
+    }
   });
 });
 
