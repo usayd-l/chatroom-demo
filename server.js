@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const port = process.env.PORT || 8080;
 
-// Serve static files
+// serve static files
 const server = http.createServer((req, res) => {
   const filePath = path.join(__dirname, req.url === "/" ? "index.html" : req.url);
   fs.readFile(filePath, (err, data) => {
@@ -27,7 +27,7 @@ const wss = new WebSocketServer({ server });
 const clients = new Map(); // ws -> { username, ip }
 let chatHistory = [];
 
-// Helpers
+// helper functions
 function getRemoteIP(req) {
   const forwarded = req.headers?.["x-forwarded-for"] || req.headers?.["x-real-ip"];
   if (forwarded) return forwarded.split(",")[0].trim();
@@ -52,31 +52,33 @@ function broadcast(obj) {
 }
 
 function updateOnlineCount() {
-  broadcast({ type: "online", count: wss.clients.size });
+  const connected = Array.from(wss.clients).filter(c => c.readyState === 1).length;
+  broadcast({ type: "online", count: connected });
 }
 
 function broadcastTyping(username, isTyping) {
   broadcast({ type: "typing", username, isTyping });
 }
 
-// WebSocket logic
+// websocket behavior
 wss.on("connection", (ws, req) => {
   const remoteIP = getRemoteIP(req);
   clients.set(ws, { username: null, ip: remoteIP });
 
-  // send chat history on connect
   ws.send(JSON.stringify({ type: "history", data: chatHistory }));
   updateOnlineCount();
 
   ws.on("message", (msgRaw) => {
     try {
       const data = JSON.parse(msgRaw);
-      const client = clients.get(ws) || {};
+      const client = clients.get(ws);
 
-      // Register username
+      if (!client) return; // safety
+
+      // handle registration
       if (data.type === "register") {
         const newName = data.username || "Anonymous";
-        const oldName = client.username || null;
+        const oldName = client.username;
 
         // prevent duplicate usernames
         const taken = Array.from(clients.values()).some(
@@ -90,12 +92,12 @@ wss.on("connection", (ws, req) => {
           return;
         }
 
-        // assign name
-        clients.set(ws, { username: newName, ip: remoteIP });
+        // assign username once (no re-map of socket)
+        client.username = newName;
+        clients.set(ws, client);
 
-        // only announce if first registration or name changed
         if (!oldName) {
-          console.log(`👤 ${guessDevice(data.userAgent)}  ${newName} — ${remoteIP}`);
+          console.log(`👤 ${guessDevice(data.userAgent)} ${newName} — ${remoteIP}`);
           broadcast({ type: "system", text: `${newName} joined the chat` });
         } else if (oldName !== newName) {
           console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
@@ -106,14 +108,13 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // Typing events
+      // typing
       if (data.type === "typing") {
-        const user = clients.get(ws);
-        if (user?.username) broadcastTyping(user.username, data.isTyping);
+        if (client.username) broadcastTyping(client.username, data.isTyping);
         return;
       }
 
-      // Clear chat (admin only)
+      // admin clear
       if (data.type === "chat" && data.text === "/clear" && client.username === "usayd") {
         chatHistory = [];
         broadcast({ type: "clear" });
@@ -121,7 +122,7 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // Normal chat messages
+      // normal chat
       if (data.type === "chat") {
         const entry = {
           username: client.username || "Anonymous",
@@ -129,15 +130,12 @@ wss.on("connection", (ws, req) => {
           time: new Date().toLocaleTimeString(),
         };
         chatHistory.push(entry);
-
-        // limit message history (prevent memory overload)
         if (chatHistory.length > 500) chatHistory.shift();
-
         broadcast({ type: "chat", data: entry });
         console.log(`[${entry.time}] ${entry.username}: ${entry.text}`);
       }
-    } catch (e) {
-      console.warn("Parse error:", e.message);
+    } catch (err) {
+      console.warn("Parse error:", err.message);
     }
   });
 
