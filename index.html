@@ -1,165 +1,130 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>The Grid Chat</title>
-<style>
-  html, body {
-    height: 100%;
-    margin: 0;
-  }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Grid</title>
+  <style>
+    body {
+      background-color: #000;
+      color: #00ff66;
+      font-family: "Courier New", monospace;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
 
-  body {
-    display: flex;
-    flex-direction: column;
-    font-family: monospace;
-    background: #0b0b0b;
-    color: #0f0;
-  }
-
-  header {
-    background: #111;
-    padding: 8px 12px;
-    font-size: 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid #222;
-  }
-
-  #messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px;
-    font-size: 14px;
-  }
-
-  #input {
-    display: flex;
-    flex-direction: column;
-    border-top: 1px solid #222;
-    padding: 4px 8px;
-  }
-
-  #msg-container {
-    display: flex;
-  }
-
-  input#msg {
-    flex: 1;
-    padding: 10px;
-    background: #111;
-    color: #0f0;
-    border: none;
-    outline: none;
-    font-size: 14px;
-  }
-
-  button {
-    background: #0a84ff;
-    border: none;
-    color: white;
-    padding: 0 15px;
-    font-size: 14px;
-    cursor: pointer;
-  }
-
-  #note {
-    font-size: 12px;
-    color: #0a0;
-    margin-left: 4px;
-    margin-bottom: 2px;
-  }
-
-  .system {
-    color: #088;
-    font-style: italic;
-    text-align: center;
-    margin: 4px 0;
-  }
-
-  .msg {
-    margin: 4px 0;
-    word-wrap: break-word;
-  }
-
-  .name {
-    color: #0a84ff;
-    font-weight: bold;
-  }
-
-  .time {
-    color: #0f0;
-    font-size: 0.8em;
-    margin-left: 4px;
-  }
-
-  #typing {
-    font-size: 0.85em;
-    color: #0f0;
-    padding-left: 10px;
-    height: 18px;
-  }
-
-  @media (max-width: 600px) {
     header {
-      font-size: 14px;
-      padding: 6px 10px;
+      text-align: center;
+      padding: 10px;
+      border-bottom: 1px solid #00ff66;
     }
-    input#msg {
-      font-size: 13px;
-      padding: 8px;
+
+    #online {
+      font-size: 0.9em;
+      color: #00ffaa;
     }
-    button {
-      font-size: 13px;
-      padding: 0 10px;
-    }
+
     #messages {
-      font-size: 13px;
+      flex: 1;
+      overflow-y: auto;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
-  }
-</style>
+
+    .message, .system {
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      font-size: 0.95em;
+      line-height: 1.4em;
+    }
+
+    .system {
+      color: #00ffaa;
+      text-align: center;
+      font-style: italic;
+    }
+
+    .you {
+      color: #00ffcc;
+    }
+
+    #inputArea {
+      display: flex;
+      border-top: 1px solid #00ff66;
+      padding: 8px;
+      background: #000;
+    }
+
+    #msg {
+      flex: 1;
+      background: #000;
+      color: #00ff66;
+      border: none;
+      outline: none;
+      font-family: inherit;
+      font-size: 1em;
+    }
+
+    button {
+      background: #00ff66;
+      border: none;
+      color: #000;
+      font-weight: bold;
+      padding: 8px 14px;
+      margin-left: 8px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      background: #00ffaa;
+    }
+
+    @media (max-width: 600px) {
+      header {
+        font-size: 0.9em;
+      }
+      #msg {
+        font-size: 0.9em;
+      }
+      button {
+        padding: 6px 10px;
+      }
+    }
+  </style>
 </head>
 <body>
-<header>
-  <div>💬 The Grid</div>
-  <div id="online">Online: 0</div>
-</header>
+  <header>
+    <h2>THE GRID</h2>
+    <div id="online">Online: 0</div>
+  </header>
 
-<div id="messages"></div>
-<div id="typing"></div>
+  <div id="messages"></div>
 
-<div id="input">
-  <div id="note">Leave blank to join as Anonymous. Use /name NEWNAME to change your name.</div>
-  <div id="msg-container">
-    <input id="msg" placeholder="Type a message..." />
+  <div id="inputArea">
+    <input id="msg" placeholder="Type your message..." autocomplete="off" />
     <button onclick="send()">Send</button>
   </div>
-</div>
 
 <script>
-  // --- Username setup ---
   let username = sessionStorage.getItem("chatUsername");
   if (!username) {
     username = prompt("Enter your name (or leave blank for Anonymous):") || "Anonymous";
     sessionStorage.setItem("chatUsername", username);
   }
 
+  // 🧠 Track if user wants a fresh chat on load
+  const freshStart = sessionStorage.getItem("freshStart") === "true";
+
   const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
   const messages = document.getElementById("messages");
   const online = document.getElementById("online");
-
-  // Typing indicator
-  const typingIndicator = document.createElement("div");
-  typingIndicator.id = "typingIndicator";
-  typingIndicator.style.fontSize = "12px";
-  typingIndicator.style.color = "#0f0";
-  typingIndicator.style.margin = "2px 10px";
-  typingIndicator.style.minHeight = "16px";
-  messages.parentNode.appendChild(typingIndicator);
-
-  let typingTimeout;
 
   function scrollBottom() {
     messages.scrollTop = messages.scrollHeight;
@@ -176,6 +141,13 @@
   socket.onmessage = (event) => {
     const packet = JSON.parse(event.data);
 
+    // 🧹 Ignore server history if it's a fresh session
+    if (packet.type === "history" && freshStart) {
+      messages.innerHTML = "";
+      sessionStorage.removeItem("freshStart");
+      return;
+    }
+
     if (packet.type === "chat") {
       addMessage(packet.data.username, packet.data.text, packet.data.time);
     } else if (packet.type === "history") {
@@ -188,27 +160,22 @@
       addSystem("Chat cleared by admin");
     } else if (packet.type === "online") {
       online.textContent = `Online: ${packet.count}`;
-    } else if (packet.type === "typing_update") {
-      updateTypingDisplay(packet.list.filter(u => u !== username));
     }
   };
 
-  function addMessage(name, text, time) {
-    // format ISO timestamps sent from server into the user's local timezone
-    const displayTime = (function formatTime(iso) {
-      if (!iso) return "";
-      try {
-        const d = new Date(iso);
-        if (isNaN(d)) return iso; // fallback if not a valid date
-        return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      } catch (e) {
-        return iso;
-      }
-    })(time);
+  function formatTime(serverTime) {
+    try {
+      const localTime = new Date(serverTime).toLocaleTimeString([], { hour12: true });
+      return localTime;
+    } catch {
+      return serverTime;
+    }
+  }
 
+  function addMessage(name, text, time) {
     const div = document.createElement("div");
-    div.className = "msg";
-    div.textContent = `[${displayTime}] ${name}: ${text}`;
+    div.className = "message" + (name === username ? " you" : "");
+    div.innerHTML = `[${formatTime(time)}] ${name}: ${text}`;
     messages.appendChild(div);
     scrollBottom();
   }
@@ -221,28 +188,9 @@
     scrollBottom();
   }
 
-  // --- Typing display ---
-  function updateTypingDisplay(list) {
-    if (!list.length) {
-      typingIndicator.textContent = "";
-      if (typingTimeout) clearInterval(typingTimeout);
-      return;
-    }
-
-    let dots = 0;
-    typingIndicator.textContent = list.join(", ") + " is typing";
-    if (typingTimeout) clearInterval(typingTimeout);
-    typingTimeout = setInterval(() => {
-      dots = (dots + 1) % 4;
-      typingIndicator.textContent = list.join(", ") + " is typing" + ".".repeat(dots);
-    }, 500);
-  }
-
-  // --- Input handling ---
-  const msgInput = document.getElementById("msg");
-
   function send() {
-    const text = msgInput.value.trim();
+    const input = document.getElementById("msg");
+    const text = input.value.trim();
     if (!text) return;
 
     if (text.startsWith("/name ")) {
@@ -251,31 +199,27 @@
         username = newName;
         sessionStorage.setItem("chatUsername", username);
         socket.send(JSON.stringify({ type: "register", username, userAgent: navigator.userAgent }));
-        addSystem(`Your username has been changed to ${username}`);
-        msgInput.value = "";
-        socket.send(JSON.stringify({ type: "stop_typing" }));
+        addSystem(`You are now known as ${username}`);
+        input.value = "";
         return;
       }
     }
 
     socket.send(JSON.stringify({ type: "chat", text }));
-    msgInput.value = "";
-    socket.send(JSON.stringify({ type: "stop_typing" }));
+    input.value = "";
   }
 
-  msgInput.addEventListener("keydown", (e) => {
+  document.getElementById("msg").addEventListener("keydown", (e) => {
     if (e.key === "Enter") send();
   });
 
-  msgInput.addEventListener("input", () => {
-    if (msgInput.value.trim()) {
-      socket.send(JSON.stringify({ type: "typing" }));
-    } else {
-      socket.send(JSON.stringify({ type: "stop_typing" }));
-    }
+  // 🧹 Mark chat as fresh and confirm before closing
+  window.addEventListener("beforeunload", (event) => {
+    sessionStorage.setItem("freshStart", "true");
+    event.preventDefault();
+    event.returnValue = "";
   });
 </script>
-
 
 </body>
 </html>
