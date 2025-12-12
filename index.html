@@ -12,11 +12,14 @@
       margin: 0;
       padding: 0;
       display: flex;
-      flex-direction: column;
-
-      /* FIX: true viewport height on mobile so keyboard doesn’t push UI off screen */
       height: 100dvh;
       overflow: hidden;
+    }
+
+    #chatContainer {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
     }
 
     header {
@@ -28,6 +31,7 @@
     #online {
       font-size: 0.9em;
       color: #00ffaa;
+      cursor: pointer;
     }
 
     #messages {
@@ -56,7 +60,6 @@
       color: #00ffcc;
     }
 
-    /* FIX: input bar pinned bottom, always visible, even with mobile keyboard */
     #inputArea {
       display: flex;
       border-top: 1px solid #00ff66;
@@ -67,7 +70,6 @@
       z-index: 999;
     }
 
-    /* FIX: prevent iPhone from zooming input (must be >=16px) */
     #msg {
       flex: 1;
       background: #000;
@@ -93,12 +95,32 @@
       background: #00ffaa;
     }
 
-    @media (max-width: 600px) {
-      header {
-        font-size: 0.9em;
+    #activeUsers {
+      width: 150px;
+      border-left: 1px solid #00ff66;
+      padding: 10px;
+      overflow-y: auto;
+      font-size: 0.9em;
+      color: #00ffaa;
+    }
+
+    #container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    img.gif {
+      max-width: 300px;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 700px) {
+      #activeUsers {
+        display: none;
       }
       #msg {
-        font-size: 16px; /* MUST stay 16px for mobile behavior */
+        font-size: 16px;
       }
       button {
         padding: 6px 10px;
@@ -107,124 +129,136 @@
   </style>
 </head>
 <body>
-  <header>
-    <h2>THE GRID</h2>
-    <div id="online">Online: 0</div>
-  </header>
+  <div id="chatContainer">
+    <header>
+      <h2>THE GRID</h2>
+      <div id="online">Online: 0</div>
+    </header>
 
-  <div id="messages"></div>
+    <div id="container">
+      <div id="messages"></div>
+      <div id="activeUsers"></div>
+    </div>
 
-  <div id="inputArea">
-    <input id="msg" placeholder="Type your message..." autocomplete="off" />
-    <button onclick="send()">Send</button>
+    <div id="inputArea">
+      <input id="msg" placeholder="Type your message..." autocomplete="off" />
+      <button onclick="send()">Send</button>
+    </div>
   </div>
 
 <script>
-  let username = sessionStorage.getItem("chatUsername");
-  if (!username) {
-    username = prompt("Enter your name (or leave blank for Anonymous):") || "Anonymous";
-    sessionStorage.setItem("chatUsername", username);
+let username = sessionStorage.getItem("chatUsername");
+if (!username) {
+  username = prompt("Enter your name (or leave blank for Anonymous):") || "Anonymous";
+  sessionStorage.setItem("chatUsername", username);
+}
+
+const freshStart = sessionStorage.getItem("freshStart") === "true";
+const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+const messages = document.getElementById("messages");
+const online = document.getElementById("online");
+const activeUsersDiv = document.getElementById("activeUsers");
+
+function scrollBottom() {
+  messages.scrollTop = messages.scrollHeight;
+}
+
+socket.onopen = () => {
+  socket.send(JSON.stringify({
+    type: "register",
+    username,
+    userAgent: navigator.userAgent
+  }));
+};
+
+socket.onmessage = (event) => {
+  const packet = JSON.parse(event.data);
+
+  if (packet.type === "history" && freshStart) {
+    messages.innerHTML = "";
+    sessionStorage.removeItem("freshStart");
+    return;
   }
 
-  // 🧠 Track if user wants a fresh chat on load
-  const freshStart = sessionStorage.getItem("freshStart") === "true";
-
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
-  const messages = document.getElementById("messages");
-  const online = document.getElementById("online");
-
-  function scrollBottom() {
-    messages.scrollTop = messages.scrollHeight;
+  if (packet.type === "chat") {
+    addMessage(packet.data.username, packet.data.text, packet.data.time, packet.data.isGif);
+  } else if (packet.type === "system") {
+    addSystem(packet.text);
+  } else if (packet.type === "clear") {
+    messages.innerHTML = "";
+    addSystem("Chat cleared by admin");
+  } else if (packet.type === "online") {
+    online.textContent = `Online: ${packet.count}`;
+    if (packet.users) updateActiveUsers(packet.users);
   }
+};
 
-  socket.onopen = () => {
-    socket.send(JSON.stringify({
-      type: "register",
-      username,
-      userAgent: navigator.userAgent
-    }));
-  };
+function formatTime(serverTime) {
+  try {
+    return new Date(serverTime).toLocaleTimeString([], { hour12: true });
+  } catch {
+    return serverTime;
+  }
+}
 
-  socket.onmessage = (event) => {
-    const packet = JSON.parse(event.data);
+function addMessage(name, text, time, isGif) {
+  const div = document.createElement("div");
+  div.className = "message" + (name === username ? " you" : "");
+  if (isGif) {
+    const img = document.createElement("img");
+    img.src = text;
+    img.className = "gif";
+    div.appendChild(img);
+  } else {
+    div.textContent = `[${formatTime(time)}] ${name}: ${text}`;
+  }
+  messages.appendChild(div);
+  scrollBottom();
+}
 
-    if (packet.type === "history" && freshStart) {
-      messages.innerHTML = "";
-      sessionStorage.removeItem("freshStart");
+function addSystem(text) {
+  const div = document.createElement("div");
+  div.className = "system";
+  div.textContent = text;
+  messages.appendChild(div);
+  scrollBottom();
+}
+
+function send() {
+  const input = document.getElementById("msg");
+  const text = input.value.trim();
+  if (!text) return;
+
+  if (text.startsWith("/name ")) {
+    const newName = text.slice(6).trim();
+    if (newName) {
+      username = newName;
+      sessionStorage.setItem("chatUsername", username);
+      socket.send(JSON.stringify({ type: "register", username, userAgent: navigator.userAgent }));
+      addSystem(`You are now known as ${username}`);
+      input.value = "";
       return;
     }
-
-    if (packet.type === "chat") {
-      addMessage(packet.data.username, packet.data.text, packet.data.time);
-    } else if (packet.type === "history") {
-      messages.innerHTML = "";
-      packet.data.forEach(msg => addMessage(msg.username, msg.text, msg.time));
-    } else if (packet.type === "system") {
-      addSystem(packet.text);
-    } else if (packet.type === "clear") {
-      messages.innerHTML = "";
-      addSystem("Chat cleared by admin");
-    } else if (packet.type === "online") {
-      online.textContent = `Online: ${packet.count}`;
-    }
-  };
-
-  function formatTime(serverTime) {
-    try {
-      return new Date(serverTime).toLocaleTimeString([], { hour12: true });
-    } catch {
-      return serverTime;
-    }
   }
 
-  function addMessage(name, text, time) {
-    const div = document.createElement("div");
-    div.className = "message" + (name === username ? " you" : "");
-    div.innerHTML = `[${formatTime(time)}] ${name}: ${text}`;
-    messages.appendChild(div);
-    scrollBottom();
-  }
+  socket.send(JSON.stringify({ type: "chat", text }));
+  input.value = "";
+}
 
-  function addSystem(text) {
-    const div = document.createElement("div");
-    div.className = "system";
-    div.textContent = text;
-    messages.appendChild(div);
-    scrollBottom();
-  }
+function updateActiveUsers(users) {
+  activeUsersDiv.innerHTML = `<strong>Active Users:</strong><br>` + users.map(u => `• ${u}`).join('<br>');
+}
 
-  function send() {
-    const input = document.getElementById("msg");
-    const text = input.value.trim();
-    if (!text) return;
+document.getElementById("msg").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") send();
+});
 
-    if (text.startsWith("/name ")) {
-      const newName = text.slice(6).trim();
-      if (newName) {
-        username = newName;
-        sessionStorage.setItem("chatUsername", username);
-        socket.send(JSON.stringify({ type: "register", username, userAgent: navigator.userAgent }));
-        addSystem(`You are now known as ${username}`);
-        input.value = "";
-        return;
-      }
-    }
-
-    socket.send(JSON.stringify({ type: "chat", text }));
-    input.value = "";
-  }
-
-  document.getElementById("msg").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") send();
-  });
-
-  // Confirm before closing + force fresh session
-  window.addEventListener("beforeunload", (event) => {
-    sessionStorage.setItem("freshStart", "true");
-    event.preventDefault();
-    event.returnValue = "";
-  });
+// fresh session + confirmation before closing
+window.addEventListener("beforeunload", (event) => {
+  sessionStorage.setItem("freshStart", "true");
+  event.preventDefault();
+  event.returnValue = "";
+});
 </script>
-
 </body>
 </html>

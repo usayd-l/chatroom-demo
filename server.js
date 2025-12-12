@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { WebSocketServer } from "ws";
 import { fileURLToPath } from "url";
+import fetch from "node-fetch";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,9 +17,7 @@ const server = http.createServer((req, res) => {
       res.writeHead(404);
       res.end("Not Found");
     } else {
-      const type = req.url.endsWith(".js")
-        ? "application/javascript"
-        : "text/html";
+      const type = req.url.endsWith(".js") ? "application/javascript" : "text/html";
       res.writeHead(200, { "Content-Type": type });
       res.end(data);
     }
@@ -26,7 +25,7 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
-const clients = new Map(); // ws -> { username, ip }
+const clients = new Map();
 let chatHistory = [];
 
 // --- Helpers ---
@@ -53,13 +52,11 @@ function broadcast(obj) {
   }
 }
 
-function updateOnlineCount() {
-  const connected = Array.from(wss.clients).filter(c => c.readyState === 1).length;
-  broadcast({ type: "online", count: connected });
-}
-
-function broadcastTyping(username, isTyping) {
-  broadcast({ type: "typing", username, isTyping });
+function updateOnline() {
+  const users = Array.from(clients.values())
+    .filter(c => c.username)
+    .map(c => c.username);
+  broadcast({ type: "online", count: users.length, users });
 }
 
 // --- WebSocket Behavior ---
@@ -68,27 +65,26 @@ wss.on("connection", (ws, req) => {
   clients.set(ws, { username: null, ip: remoteIP });
 
   ws.send(JSON.stringify({ type: "history", data: chatHistory }));
-  updateOnlineCount();
+  updateOnline();
 
-  ws.on("message", (msgRaw) => {
+  ws.on("message", async (msgRaw) => {
     try {
       const data = JSON.parse(msgRaw);
       const client = clients.get(ws);
       if (!client) return;
 
-      // --- Handle registration ---
+      // --- Registration ---
       if (data.type === "register") {
         const newName = data.username || "Anonymous";
         const oldName = client.username;
 
-        // prevent duplicate usernames
         const taken = Array.from(clients.values()).some(
-          (c) => c.username === newName && c !== client
+          c => c.username === newName && c !== client
         );
         if (taken) {
           ws.send(JSON.stringify({
             type: "system",
-            text: `⚠️ Username '${newName}' is already taken. Choose another one.`
+            text: `⚠️ Username '${newName}' is already taken.`
           }));
           return;
         }
@@ -96,25 +92,20 @@ wss.on("connection", (ws, req) => {
         client.username = newName;
         clients.set(ws, client);
 
-        if (!oldName) {
-          console.log(`👤 ${guessDevice(data.userAgent)} ${newName} — ${remoteIP}`);
-          broadcast({ type: "system", text: `${newName} joined the chat` });
-        } else if (oldName !== newName) {
-          console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
-          broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
-        }
+        if (!oldName) broadcast({ type: "system", text: `${newName} joined the chat` });
+        else if (oldName !== newName) broadcast({ type: "system", text: `${oldName} → ${newName}` });
 
-        updateOnlineCount();
+        updateOnline();
         return;
       }
 
-      // --- Typing indicator ---
+      // --- Typing ---
       if (data.type === "typing") {
-        if (client.username) broadcastTyping(client.username, data.isTyping);
+        if (client.username) broadcast({ type: "typing", username: client.username, isTyping: data.isTyping });
         return;
       }
 
-      // --- Admin clear command ---
+      // --- Admin clear ---
       if (data.type === "chat" && data.text === "/clear" && client.username === "usayd") {
         chatHistory = [];
         broadcast({ type: "clear" });
@@ -122,29 +113,33 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // --- Normal chat message ---
+      // --- Giphy command ---
+      if (data.type === "chat" && data.text.startsWith("/gif ")) {
+        const keyword = data.text.slice(5).trim();
+        if (keyword) {
+          const res = await fetch(`https://api.giphy.com/v1/gifs/random?api_key=dc6zaTOxFJmzC&tag=${encodeURIComponent(keyword)}&rating=g`);
+          const json = await res.json();
+          const gifUrl = json.data?.images?.downsized_medium?.url;
+          if (gifUrl) {
+            broadcast({ type: "chat", data: { username: client.username, text: gifUrl, isGif: true, time: new Date().toISOString() } });
+          } else {
+            ws.send(JSON.stringify({ type: "system", text: `No GIF found for '${keyword}'` }));
+          }
+        }
+        return;
+      }
+
+      // --- Normal chat ---
       if (data.type === "chat") {
         const entry = {
           username: client.username || "Anonymous",
           text: data.text,
-          time: new Date().toISOString(), // ISO → formatted by client in local TZ
+          time: new Date().toISOString()
         };
         chatHistory.push(entry);
         if (chatHistory.length > 500) chatHistory.shift();
         broadcast({ type: "chat", data: entry });
-
-        // Log server-side time
-        const logTime = (() => {
-          const d = new Date(entry.time);
-          if (isNaN(d)) return entry.time;
-          return d.getFullYear() + "-" +
-            String(d.getMonth() + 1).padStart(2, "0") + "-" +
-            String(d.getDate()).padStart(2, "0") + " " +
-            String(d.getHours()).padStart(2, "0") + ":" +
-            String(d.getMinutes()).padStart(2, "0") + ":" +
-            String(d.getSeconds()).padStart(2, "0");
-        })();
-        console.log(`[${logTime}] ${entry.username}: ${entry.text}`);
+        console.log(`[${new Date().toLocaleString()}] ${entry.username}: ${entry.text}`);
       }
 
     } catch (err) {
@@ -152,20 +147,15 @@ wss.on("connection", (ws, req) => {
     }
   });
 
-  // --- Handle disconnect ---
   ws.on("close", () => {
     const client = clients.get(ws);
-    if (client?.username) {
-      broadcast({ type: "system", text: `${client.username} left the chat` });
-      console.log(`❌ ${client.username} disconnected`);
-    }
+    if (client?.username) broadcast({ type: "system", text: `${client.username} left the chat` });
     clients.delete(ws);
-    updateOnlineCount();
+    updateOnline();
 
-    // If no users left, clear chat
     if (wss.clients.size === 0) {
       chatHistory = [];
-      console.log("💾 All users disconnected — chat history cleared.");
+      console.log("💾 All users disconnected — chat cleared.");
     }
   });
 });
