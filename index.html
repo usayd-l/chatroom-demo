@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>The Grid</title>
   <style>
     body {
@@ -13,7 +13,9 @@
       padding: 0;
       display: flex;
       flex-direction: column;
-      height: 100vh;
+
+      /* FIX: true viewport height on mobile so keyboard doesn’t push UI off screen */
+      height: 100dvh;
       overflow: hidden;
     }
 
@@ -54,13 +56,18 @@
       color: #00ffcc;
     }
 
+    /* FIX: input bar pinned bottom, always visible, even with mobile keyboard */
     #inputArea {
       display: flex;
       border-top: 1px solid #00ff66;
       padding: 8px;
       background: #000;
+      position: sticky;
+      bottom: 0;
+      z-index: 999;
     }
 
+    /* FIX: prevent iPhone from zooming input (must be >=16px) */
     #msg {
       flex: 1;
       background: #000;
@@ -68,7 +75,7 @@
       border: none;
       outline: none;
       font-family: inherit;
-      font-size: 1em;
+      font-size: 16px;
     }
 
     button {
@@ -91,7 +98,7 @@
         font-size: 0.9em;
       }
       #msg {
-        font-size: 0.9em;
+        font-size: 16px; /* MUST stay 16px for mobile behavior */
       }
       button {
         padding: 6px 10px;
@@ -141,7 +148,6 @@
   socket.onmessage = (event) => {
     const packet = JSON.parse(event.data);
 
-    // 🧹 Ignore server history if it's a fresh session
     if (packet.type === "history" && freshStart) {
       messages.innerHTML = "";
       sessionStorage.removeItem("freshStart");
@@ -165,8 +171,7 @@
 
   function formatTime(serverTime) {
     try {
-      const localTime = new Date(serverTime).toLocaleTimeString([], { hour12: true });
-      return localTime;
+      return new Date(serverTime).toLocaleTimeString([], { hour12: true });
     } catch {
       return serverTime;
     }
@@ -213,7 +218,7 @@
     if (e.key === "Enter") send();
   });
 
-  // 🧹 Mark chat as fresh and confirm before closing
+  // Confirm before closing + force fresh session
   window.addEventListener("beforeunload", (event) => {
     sessionStorage.setItem("freshStart", "true");
     event.preventDefault();
