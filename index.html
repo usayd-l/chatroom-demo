@@ -12,14 +12,9 @@
       margin: 0;
       padding: 0;
       display: flex;
-      height: 100dvh;
-      overflow: hidden;
-    }
-
-    #chatContainer {
-      display: flex;
-      flex: 1;
       flex-direction: column;
+      height: 100dvh; /* true viewport height for mobile */
+      overflow: hidden;
     }
 
     header {
@@ -60,6 +55,13 @@
       color: #00ffcc;
     }
 
+    img.gif {
+      display: block;
+      max-width: 200px;
+      margin-top: 4px;
+      border-radius: 6px;
+    }
+
     #inputArea {
       display: flex;
       border-top: 1px solid #00ff66;
@@ -95,32 +97,12 @@
       background: #00ffaa;
     }
 
-    #activeUsers {
-      width: 150px;
-      border-left: 1px solid #00ff66;
-      padding: 10px;
-      overflow-y: auto;
-      font-size: 0.9em;
-      color: #00ffaa;
-    }
-
-    #container {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
-    }
-
-    img.gif {
-      max-width: 300px;
-      border-radius: 4px;
-    }
-
-    @media (max-width: 700px) {
-      #activeUsers {
-        display: none;
+    @media (max-width: 600px) {
+      header {
+        font-size: 0.9em;
       }
       #msg {
-        font-size: 16px;
+        font-size: 16px; /* stay 16px to prevent iOS zoom */
       }
       button {
         padding: 6px 10px;
@@ -129,21 +111,16 @@
   </style>
 </head>
 <body>
-  <div id="chatContainer">
-    <header>
-      <h2>THE GRID</h2>
-      <div id="online">Online: 0</div>
-    </header>
+  <header>
+    <h2>THE GRID</h2>
+    <div id="online">Online: 0</div>
+  </header>
 
-    <div id="container">
-      <div id="messages"></div>
-      <div id="activeUsers"></div>
-    </div>
+  <div id="messages"></div>
 
-    <div id="inputArea">
-      <input id="msg" placeholder="Type your message..." autocomplete="off" />
-      <button onclick="send()">Send</button>
-    </div>
+  <div id="inputArea">
+    <input id="msg" placeholder="Type your message..." autocomplete="off" />
+    <button onclick="send()">Send</button>
   </div>
 
 <script>
@@ -157,7 +134,6 @@ const freshStart = sessionStorage.getItem("freshStart") === "true";
 const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
 const messages = document.getElementById("messages");
 const online = document.getElementById("online");
-const activeUsersDiv = document.getElementById("activeUsers");
 
 function scrollBottom() {
   messages.scrollTop = messages.scrollHeight;
@@ -181,7 +157,10 @@ socket.onmessage = (event) => {
   }
 
   if (packet.type === "chat") {
-    addMessage(packet.data.username, packet.data.text, packet.data.time, packet.data.isGif);
+    addMessage(packet.data.username, packet.data.text, packet.data.time, packet.data.gif);
+  } else if (packet.type === "history") {
+    messages.innerHTML = "";
+    packet.data.forEach(msg => addMessage(msg.username, msg.text, msg.time, msg.gif));
   } else if (packet.type === "system") {
     addSystem(packet.text);
   } else if (packet.type === "clear") {
@@ -189,7 +168,6 @@ socket.onmessage = (event) => {
     addSystem("Chat cleared by admin");
   } else if (packet.type === "online") {
     online.textContent = `Online: ${packet.count}`;
-    if (packet.users) updateActiveUsers(packet.users);
   }
 };
 
@@ -201,16 +179,15 @@ function formatTime(serverTime) {
   }
 }
 
-function addMessage(name, text, time, isGif) {
+function addMessage(name, text, time, gifUrl) {
   const div = document.createElement("div");
   div.className = "message" + (name === username ? " you" : "");
-  if (isGif) {
+  div.innerHTML = `[${formatTime(time)}] ${name}: ${text}`;
+  if (gifUrl) {
     const img = document.createElement("img");
-    img.src = text;
+    img.src = gifUrl;
     img.className = "gif";
     div.appendChild(img);
-  } else {
-    div.textContent = `[${formatTime(time)}] ${name}: ${text}`;
   }
   messages.appendChild(div);
   scrollBottom();
@@ -245,19 +222,20 @@ function send() {
   input.value = "";
 }
 
-function updateActiveUsers(users) {
-  activeUsersDiv.innerHTML = `<strong>Active Users:</strong><br>` + users.map(u => `• ${u}`).join('<br>');
-}
-
 document.getElementById("msg").addEventListener("keydown", (e) => {
   if (e.key === "Enter") send();
 });
 
-// fresh session + confirmation before closing
+// Confirm before closing + force fresh session
 window.addEventListener("beforeunload", (event) => {
   sessionStorage.setItem("freshStart", "true");
   event.preventDefault();
   event.returnValue = "";
+});
+
+// Show active users when clicking online
+online.addEventListener("click", () => {
+  socket.send(JSON.stringify({ type: "chat", text: "/users" }));
 });
 </script>
 </body>

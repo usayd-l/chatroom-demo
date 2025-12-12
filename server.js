@@ -3,11 +3,13 @@ import fs from "fs";
 import path from "path";
 import { WebSocketServer } from "ws";
 import { fileURLToPath } from "url";
-
+import fetch from "node-fetch"; // Make sure node-fetch is in package.json
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const port = process.env.PORT || 8080;
+
+const GIPHY_API_KEY = process.env.GIPHY_API_KEY;
 
 // Serve static files
 const server = http.createServer((req, res) => {
@@ -25,10 +27,10 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
-const clients = new Map();
+const clients = new Map(); // ws -> { username, ip }
 let chatHistory = [];
 
-// --- Helpers ---
+// Helpers
 function getRemoteIP(req) {
   const forwarded = req.headers?.["x-forwarded-for"] || req.headers?.["x-real-ip"];
   if (forwarded) return forwarded.split(",")[0].trim();
@@ -52,20 +54,36 @@ function broadcast(obj) {
   }
 }
 
-function updateOnline() {
-  const users = Array.from(clients.values())
-    .filter(c => c.username)
-    .map(c => c.username);
-  broadcast({ type: "online", count: users.length, users });
+function updateOnlineCount() {
+  const connected = Array.from(wss.clients).filter(c => c.readyState === 1).length;
+  broadcast({ type: "online", count: connected });
 }
 
-// --- WebSocket Behavior ---
+function broadcastTyping(username, isTyping) {
+  broadcast({ type: "typing", username, isTyping });
+}
+
+// Fetch GIF from Giphy
+async function fetchGif(query) {
+  if (!GIPHY_API_KEY) return null;
+  try {
+    const url = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.data && data.data.length > 0) return data.data[0].images.fixed_height.url;
+  } catch (err) {
+    console.warn("GIF fetch error:", err.message);
+  }
+  return null;
+}
+
+// WebSocket behavior
 wss.on("connection", (ws, req) => {
   const remoteIP = getRemoteIP(req);
   clients.set(ws, { username: null, ip: remoteIP });
 
   ws.send(JSON.stringify({ type: "history", data: chatHistory }));
-  updateOnline();
+  updateOnlineCount();
 
   ws.on("message", async (msgRaw) => {
     try {
@@ -73,18 +91,19 @@ wss.on("connection", (ws, req) => {
       const client = clients.get(ws);
       if (!client) return;
 
-      // --- Registration ---
+      // Handle registration
       if (data.type === "register") {
         const newName = data.username || "Anonymous";
         const oldName = client.username;
 
+        // prevent duplicate usernames
         const taken = Array.from(clients.values()).some(
-          c => c.username === newName && c !== client
+          (c) => c.username === newName && c !== client
         );
         if (taken) {
           ws.send(JSON.stringify({
             type: "system",
-            text: `⚠️ Username '${newName}' is already taken.`
+            text: `⚠️ Username '${newName}' is already taken. Choose another one.`
           }));
           return;
         }
@@ -92,20 +111,25 @@ wss.on("connection", (ws, req) => {
         client.username = newName;
         clients.set(ws, client);
 
-        if (!oldName) broadcast({ type: "system", text: `${newName} joined the chat` });
-        else if (oldName !== newName) broadcast({ type: "system", text: `${oldName} → ${newName}` });
+        if (!oldName) {
+          console.log(`👤 ${guessDevice(data.userAgent)} ${newName} — ${remoteIP}`);
+          broadcast({ type: "system", text: `${newName} joined the chat` });
+        } else if (oldName !== newName) {
+          console.log(`✏️ ${oldName} → ${newName} — ${remoteIP}`);
+          broadcast({ type: "system", text: `${oldName} changed name to ${newName}` });
+        }
 
-        updateOnline();
+        updateOnlineCount();
         return;
       }
 
-      // --- Typing ---
+      // Typing indicator
       if (data.type === "typing") {
-        if (client.username) broadcast({ type: "typing", username: client.username, isTyping: data.isTyping });
+        if (client.username) broadcastTyping(client.username, data.isTyping);
         return;
       }
 
-      // --- Admin clear ---
+      // Admin clear command
       if (data.type === "chat" && data.text === "/clear" && client.username === "usayd") {
         chatHistory = [];
         broadcast({ type: "clear" });
@@ -113,33 +137,41 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // --- Giphy command ---
-      if (data.type === "chat" && data.text.startsWith("/gif ")) {
-        const keyword = data.text.slice(5).trim();
-        if (keyword) {
-          const res = await fetch(`https://api.giphy.com/v1/gifs/random?api_key=dc6zaTOxFJmzC&tag=${encodeURIComponent(keyword)}&rating=g`);
-          const json = await res.json();
-          const gifUrl = json.data?.images?.downsized_medium?.url;
-          if (gifUrl) {
-            broadcast({ type: "chat", data: { username: client.username, text: gifUrl, isGif: true, time: new Date().toISOString() } });
-          } else {
-            ws.send(JSON.stringify({ type: "system", text: `No GIF found for '${keyword}'` }));
-          }
-        }
+      // Active users command
+      if (data.type === "chat" && data.text === "/users") {
+        const users = Array.from(clients.values())
+          .filter(c => c.username)
+          .map(c => c.username);
+        ws.send(JSON.stringify({ type: "system", text: `Active users: ${users.join(", ")}` }));
         return;
       }
 
-      // --- Normal chat ---
+      // Normal chat message, with GIF support
       if (data.type === "chat") {
         const entry = {
           username: client.username || "Anonymous",
           text: data.text,
-          time: new Date().toISOString()
+          time: new Date().toISOString(),
         };
+
+        // Check if message starts with /gif keyword
+        if (entry.text.startsWith("/gif ")) {
+          const query = entry.text.slice(5).trim();
+          const gifUrl = await fetchGif(query);
+          if (gifUrl) {
+            entry.gif = gifUrl; // send to clients
+          } else {
+            ws.send(JSON.stringify({ type: "system", text: `No GIF found for '${query}'` }));
+          }
+        }
+
         chatHistory.push(entry);
         if (chatHistory.length > 500) chatHistory.shift();
         broadcast({ type: "chat", data: entry });
-        console.log(`[${new Date().toLocaleString()}] ${entry.username}: ${entry.text}`);
+
+        // Server-side log
+        const logTime = new Date(entry.time).toLocaleString();
+        console.log(`[${logTime}] ${entry.username}: ${entry.text}`);
       }
 
     } catch (err) {
@@ -149,13 +181,17 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     const client = clients.get(ws);
-    if (client?.username) broadcast({ type: "system", text: `${client.username} left the chat` });
+    if (client?.username) {
+      broadcast({ type: "system", text: `${client.username} left the chat` });
+      console.log(`❌ ${client.username} disconnected`);
+    }
     clients.delete(ws);
-    updateOnline();
+    updateOnlineCount();
 
+    // Clear chat if no users left
     if (wss.clients.size === 0) {
       chatHistory = [];
-      console.log("💾 All users disconnected — chat cleared.");
+      console.log("💾 All users disconnected — chat history cleared.");
     }
   });
 });
