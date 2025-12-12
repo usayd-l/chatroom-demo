@@ -9,6 +9,5 @@
   },
   "dependencies": {
     "ws": "^8.18.3",
-    "node-fetch": "^3.4.0"
-  }
+    "node-fetch": "^3"
 }
